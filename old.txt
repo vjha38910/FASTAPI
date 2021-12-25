@@ -1,0 +1,149 @@
+from typing import Optional
+from fastapi import FastAPI, Response, responses, status, HTTPException, Depends
+from fastapi.params import Body
+from pydantic import BaseModel
+
+from starlette.status import HTTP_204_NO_CONTENT, HTTP_404_NOT_FOUND
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import time
+from.import models
+from.database import engine, get_db
+from sqlalchemy.orm import Session
+
+
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI()
+
+
+# title str , content str, categry, Bool publish or save content
+class Post(BaseModel):
+    title: str
+    content: str
+    published: bool = True
+    rating: Optional[int] = None
+
+#my_posts= [{"title":"title of post ", "content":"post content","id":1},{"title":"food", "content":"dosa","id":2}]
+
+while True:
+
+    try:
+        conn=psycopg2.connect(host='localhost',database='fastapi',user='postgres',
+                        password='manage', cursor_factory=RealDictCursor)
+        cursor = conn.cursor()
+
+        print('Database connection was successful')
+        break
+    except Exception as error:
+        print('Database connection was failed')
+        print("Error:",error)
+        time.sleep(2)
+
+
+
+def find_post(id):
+    for p in my_posts:
+        if p['id']==id:
+            return p
+
+def find_index_post(id):
+    for i,p in enumerate(my_posts):
+        if p['id']==id:
+            return i
+
+@app.get("/test")
+def login():
+    return {"Hello": "World"}
+
+@app.get("/sql")
+def test_posts(db: Session = Depends(get_db)):
+    posts=db.query(models.Post).all()
+    return{"data": posts}
+
+
+
+@app.get("/post")
+def get_posts():
+   # cursor.execute("""SELECT * FROM posts""")
+    cursor.execute("SELECT * FROM posts")
+    post=cursor.fetchall()
+    return {"data":post}
+
+# @app.post("/createpost")
+# def create_post(payload: dict = Body(...)):
+#     print(payload)
+#     return {"message":f"title:{payload['title']} content:{payload['content']}"}
+
+# @app.post("/posts", status_code= status.HTTP_201_CREATED)
+# def create_post(post: Post):
+#     post_dict= post.dict()
+#     post_dict['id']= randrange(0,10000)
+#     my_posts.append(post_dict)
+#     return {"data":post_dict}
+
+@app.post("/posts", status_code= status.HTTP_201_CREATED)
+def create_post(post: Post):
+    cursor.execute("INSERT INTO posts (title, content,published) VALUES(%s,%s,%s) RETURNING *",
+        ( post.title, post.content, post.published))# will prevent sql injection
+    new_post=cursor.fetchone()
+    conn.commit()
+    return {"data":new_post}
+# structure posts carefully  if we have paths matching by chance there might be conflcits
+@app.get("/post/latest/")
+def get_latest_post():
+    post= my_posts[len(my_posts)-1]
+    return {"detail": post}
+
+@app.get("/post/{id}")
+def get_post(id: int):#, response: Response
+    #post = find_post(id)
+    cursor.execute("SELECT * FROM posts WHERE id=%s",(str(id)))
+    post=cursor.fetchone()
+
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail= f"post with id :{id} was not found")
+        # response.status_code = status.HTTP_404_NOT_FOUND
+        # return{'message': f"post with id :{id} was not found"}
+    return{"post_detail":post}
+
+@app.delete("/posts/{id}", status_code=HTTP_204_NO_CONTENT)
+def delete_post(id: int):
+    # delete post
+    # find index of item with required ID
+    # my post.pop
+    #index= find_index_post(id)
+    cursor.execute("DELETE FROM posts WHERE iD= %s returning *",(str(id),))
+    post = cursor.fetchone()
+    if post == None:
+        raise HTTPException(status_code= HTTP_404_NOT_FOUND, detail= f"post with id:{id} does not exist")
+
+    #my_posts.pop(index)
+    return Response(status_code=HTTP_204_NO_CONTENT)
+
+@app.put("/posts/{id}")
+def update_post(id: int, post: Post):
+    #index= find_index_post(id)
+    cursor.execute("UPDATE posts SET title=%s, content= %s, published=%s WHERE ID=%s RETURNING *",
+     (post.title,post.content,post.published,str(id)))
+    updated_post = cursor.fetchone()
+    conn.commit()
+
+
+    if updated_post == None:
+        raise HTTPException(status_code= HTTP_404_NOT_FOUND, detail= f"post with id:{id} does not exist")
+    return{"data":updated_post}
+    # post_dict= post.dict()
+    # post_dict['id']=id
+    # my_posts[index]= post_dict
+    # return{'data':post_dict}
+# post gress library psycopg
+# pip install psycopg2
+
+
+
+
+
+
+
+
